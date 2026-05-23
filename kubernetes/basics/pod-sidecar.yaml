@@ -1,0 +1,42 @@
+# pod-sidecar.yaml
+# Two containers sharing the same pod
+# Main container: nginx serving web content
+# Sidecar container: busybox reading the same logs
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sidecar-pod
+  labels:
+    app: sidecar-demo
+spec:
+  # Shared volume between both containers
+  volumes:
+  - name: shared-logs
+    emptyDir: {}       # temporary directory, lives as long as pod
+
+  containers:
+
+  # Main container — nginx web server
+  - name: nginx
+    image: nginx:alpine
+    ports:
+    - containerPort: 80
+    volumeMounts:
+    - name: shared-logs
+      mountPath: /var/log/nginx   # nginx writes logs here
+
+  # Sidecar container — reads nginx logs
+  - name: log-reader
+    image: busybox
+    command: ["/bin/sh", "-c"]
+    args:
+    - |
+      while true; do
+        echo "=== Reading nginx logs ==="
+        cat /logs/access.log 2>/dev/null || echo "No logs yet"
+        sleep 10
+      done
+    volumeMounts:
+    - name: shared-logs
+      mountPath: /logs            # same volume, different path

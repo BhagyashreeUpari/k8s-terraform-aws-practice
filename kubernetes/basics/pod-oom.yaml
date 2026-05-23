@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: oom-pod
+spec:
+  containers:
+  - name: memory-hog
+    image: polinux/stress
+    command: ['stress']
+    args: ["--vm", "1", "--vm-bytes", "200M", "--vm-hang", "1"]
+    resources:
+      requests:
+        memory: "50Mi"
+      limits:
+        memory: "100Mi" # limit is 100Mi but tries to use 200Mi
+

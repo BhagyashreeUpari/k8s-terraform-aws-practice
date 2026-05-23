@@ -1,0 +1,26 @@
+# pod-basic.yaml
+# A standalone pod — no Deployment, no ReplicaSet
+# If this pod dies — it does NOT restart automatically
+# Use only for testing and understanding
+
+apiVersion: v1
+kind : Pod
+metadata :
+  name : nginx-pod
+  namespace : default 
+  labels :
+    app : nginx-pod
+spec :
+  containers :
+  - name : nginx
+    image : nginx:alpine
+    ports :
+    - containerPort : 80
+    resources :
+      requests : 
+        memory : "64Mi"
+        cpu : "50m"
+      limits :
+        memory : "128Mi"
+        cpu : "100m"
+        

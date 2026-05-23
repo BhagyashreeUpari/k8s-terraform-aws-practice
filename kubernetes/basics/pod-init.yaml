@@ -1,0 +1,31 @@
+# pod-init.yaml
+# Init container runs BEFORE main container
+# Main container only starts after init succeeds
+# Use case: wait for dependency, run migrations
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: init-pod
+  labels:
+    app: init-demo
+spec:
+  # Init containers run in ORDER before main containers
+  initContainers:
+
+  - name: wait-for-service
+    image: busybox
+    command: ["/bin/sh", "-c"]
+    args:
+    - |
+      echo "Init container: checking if service is ready..."
+      sleep 5
+      echo "Init container: service is ready. Starting main app."
+
+  # Main container only starts after ALL init containers finish
+  containers:
+  - name: main-app
+    image: nginx:alpine
+    ports:
+    - containerPort: 80
+    
