@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: configmap-demo
+spec:
+  volumes:
+  # Way 3: mount configmap as volume
+  - name: config-volume
+    configMap:
+      name: app-config-yaml
+
+  containers:
+  - name: demo-app
+    image: nginx:alpine
+    
+    env:
+    # Way 1: individual key from ConfigMap
+    - name: APP_ENVIRONMENT
+      valueFrom:
+        configMapKeyRef:
+          name: app-config-yaml
+          key: APP_ENV
+
+    - name: LOG_LEVEL
+      valueFrom:
+        configMapKeyRef:
+          name: app-config-yaml
+          key: LOG_LEVEL
+
+    # Way 2: ALL keys from ConfigMap as env vars at once
+    envFrom:
+    - configMapRef:
+        name: app-config-literal
+
+    # Way 3: mount as file
+    volumeMounts:
+    - name: config-volume
+      mountPath: /etc/config
+      readOnly: true
+
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"

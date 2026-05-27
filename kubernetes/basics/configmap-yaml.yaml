@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config-yaml
+  namespace: default
+data:
+  APP_ENV: "development"
+  LOG_LEVEL: "debug"
+  MAX_CONNECTIONS: "100"
+  TIMEOUT_SECONDS: "30"
+  app.properties:
+    server.port=8080
+    server.timeout=30s
+    feature.payments=true
+    feature.fraudcheck=false
