@@ -1,0 +1,20 @@
+# NodePort — accessible from outside cluster
+# Opens port 30080 on every node
+# Access via: NodeIP:30080
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-app-nodeport
+  namespace: default
+spec:
+  type: NodePort
+  selector:
+    app: web-app
+  ports:
+  - name: http
+    protocol: TCP
+    port: 80
+    targetPort: 80 #pod port
+    nodePort: 30080 #node port (30000-32767)
+
