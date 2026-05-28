@@ -1,0 +1,26 @@
+# Pod that uses persistent storage
+# Data written to /data survives pod restart
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: storage-demo
+spec:
+  volumes:
+  - name: persistent-storage
+    persistentVolumeClaim:
+      claimName: pvc-manual    # reference the PVC
+
+  containers:
+  - name: app
+    image: nginx:alpine
+    volumeMounts:
+    - name: persistent-storage
+      mountPath: /data          # mount point inside container
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"

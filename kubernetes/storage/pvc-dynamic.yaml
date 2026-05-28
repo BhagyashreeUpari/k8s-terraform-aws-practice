@@ -1,0 +1,16 @@
+# Dynamic PVC — StorageClass creates PV automatically
+# Uses Minikube's built-in 'standard' StorageClass
+# On AWS this would create an EBS volume automatically
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-dynamic
+  namespace: default
+spec:
+  storageClassName: standard    # Minikube's built-in StorageClass
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 200Mi

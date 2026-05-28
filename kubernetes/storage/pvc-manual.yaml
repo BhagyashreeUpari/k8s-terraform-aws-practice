@@ -1,0 +1,15 @@
+# PVC — pod requests storage
+# Kubernetes finds a matching PV and binds them
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-manual
+  namespace: default
+spec:
+  storageClassName: manual    # must match PV storageClassName
+  accessModes:
+    - ReadWriteOnce           # must match PV accessModes
+  resources:
+    requests:
+      storage: 500Mi          # requesting 500MB from the 1GB PV

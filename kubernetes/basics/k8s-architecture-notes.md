@@ -583,5 +583,275 @@ Step 3: Eviction order:
 Step 4: Evicted pods get rescheduled on another node
 Step 5: If no other node has capacity → pod stays Pending
 
+Q1. "What is the difference between resource requests and limits?"
+Requests are the guaranteed minimum — Kubernetes uses them to decide which node to schedule a pod on. If a node does not have enough capacity to satisfy requests, the pod is not scheduled there. Limits are the hard ceiling — a pod cannot exceed its memory limit without being OOMKilled, and cannot exceed its CPU limit without being throttled. Setting requests too high wastes capacity. Setting limits too low causes OOMKills. The best practice is to set requests equal to typical usage and limits at around twice the typical usage based on profiling.
 
+Q2. "What are QoS classes in Kubernetes and why do they matter?"
+QoS classes determine the order of pod eviction when a node runs out of resources. Kubernetes assigns them automatically based on how resources are configured. Guaranteed means requests equal limits for all containers — these pods are evicted last. Burstable means requests are set but lower than limits — middle priority. BestEffort means no resources set at all — evicted first. In production all pods should be at least Burstable. BestEffort pods should never run in production because they are the first casualties when any node experiences memory pressure.
+
+Q3. "What is the difference between CPU throttling and OOMKill?"
+CPU is compressible — when a pod exceeds its CPU limit Kubernetes throttles it, meaning it runs slower but keeps running. Memory is not compressible — when a pod exceeds its memory limit the Linux kernel OOMKills it with exit code 137. The pod then restarts. This is why memory limits need more careful tuning than CPU limits. A memory limit set too low causes constant OOMKill restart cycles which you will see as CrashLoopBackOff with exit code 137 in kubectl describe.
+
+Q4. "What is a LimitRange and when do you use it?"
+A LimitRange sets default resource requests and limits for all pods in a namespace that do not specify their own. It also sets minimum and maximum boundaries — if a pod requests more than the max or less than the min, it is rejected. Use LimitRange to enforce resource policies across a team without requiring every developer to manually set resources on every pod. Combined with ResourceQuota which limits total consumption across the namespace, LimitRange gives namespace-level resource governance.
+
+Scenario Q5. "Your pod keeps restarting with exit code 137. What is the cause and fix?"
+
+Exit code 137 = OOMKill = pod exceeded memory limit.
+
+Diagnose:
+  kubectl describe pod pod-name
+  Look for: Last State → Reason: OOMKilled
+  Look for: Exit Code: 137
+
+Check memory usage pattern:
+  kubectl top pod pod-name
+  Is it near the limit? What is the trend?
+
+Fix options:
+  Option 1: Increase memory limit (quick fix)
+    kubectl patch deployment name -p \
+    '{"spec":{"template":{"spec":{"containers":
+    [{"name":"app","resources":{"limits":
+    {"memory":"512Mi"}}}]}}}}'
+
+  Option 2: Find and fix memory leak (proper fix)
+    Profile the application
+    Check for objects not being garbage collected
+    Check for connection pools not being closed
+
+  Option 3: Add memory-based HPA
+    Scale horizontally instead of giving one pod more memory
+    Better for stateless services
+
+QoS Classes — How Eviction Actually Works
+Let me explain this with a real scenario.
+
+Your node has 4GB memory total
+Running pods consuming 3.8GB
+Suddenly memory spikes to 4.1GB
+Node is out of memory — must evict something
+
+ROUND 1 — Kill BestEffort pods first
+  These have NO resource requests or limits
+  Kubernetes thinks: "these pods never told me
+  how much they need — they get nothing guaranteed"
+  All BestEffort pods evicted immediately
+
+Still not enough memory? →
+
+ROUND 2 — Kill Burstable pods
+  These have requests set but are using MORE
+  than their requested amount
+  Kubernetes picks the pod using the most memory
+  above its request value first
+  "You asked for 128Mi but are using 400Mi — you go first"
+
+Still not enough memory? →
+
+ROUND 3 — Kill Guaranteed pods LAST
+  These have requests = limits
+  They told Kubernetes exactly what they need
+  and are not exceeding it
+  Kubernetes respects this and evicts them last
+
+LimitRange vs ResourceQuota — The Difference
+People always confuse these two. They solve different problems.
+
+LimitRange says:
+"Every single container in this namespace
+ MUST follow these rules:
+
+ - Default CPU if not set: 200m
+ - Default memory if not set: 256Mi
+ - Maximum CPU any one container can request: 1 core
+ - Minimum CPU any one container must have: 50m"
+
+Without LimitRange:
+  Developer forgets to set resources → BestEffort pod
+  → first to be evicted on memory pressure
+
+With LimitRange:
+  Developer forgets → LimitRange applies defaults automatically
+  → pod gets Burstable QoS at minimum
+  → protected from immediate eviction
+
+Use LimitRange to: protect the cluster from poorly configured individual pods.
+
+ResourceQuota — Controls the Whole Namespace
+Think of it as a budget for the entire namespace.
+
+ResourceQuota says:
+"The ENTIRE production namespace
+ cannot use more than:
+
+ - Total CPU requests: 4 cores combined
+ - Total memory requests: 8GB combined
+ - Total pods: 20 pods maximum"
+
+Without ResourceQuota:
+  One team deploys 50 pods and uses all cluster memory
+  Other teams' pods cannot be scheduled
+  One namespace starves the entire cluster
+
+With ResourceQuota:
+  Each namespace has a hard budget
+  Team A gets 4 cores and 8GB
+  Team B gets 4 cores and 8GB
+  Neither can exceed their allocation
+
+LimitRange:
+  Each pod must be between 50m-1 CPU
+  Each pod defaults to 100m if not specified
+  ↓
+ResourceQuota:
+  All pods in namespace combined cannot exceed 4 CPU
+  Maximum 20 pods total
+
+Why Different API Versions Exist
+Kubernetes started with core objects. Over time new objects were added. They organised them into API groups.
+
+Core group (no name) → apiVersion: v1
+  These were the ORIGINAL Kubernetes objects
+  Pod, Service, ConfigMap, Secret,
+  Namespace, PersistentVolume, Node
+
+apps group → apiVersion: apps/v1
+  Added LATER for application management
+  Deployment, ReplicaSet, StatefulSet, DaemonSet
+
+autoscaling group → apiVersion: autoscaling/v2
+  For scaling objects
+  HorizontalPodAutoscaler
+
+batch group → apiVersion: batch/v1
+  For job-like objects
+  Job, CronJob
+
+networking group → apiVersion: networking.k8s.io/v1
+  For network objects
+  Ingress, NetworkPolicy
+
+rbac group → apiVersion: rbac.authorization.k8s.io/v1
+  For access control
+  Role, ClusterRole, RoleBinding
+
+apiVersion: v1
+  → Pod
+  → Service
+  → ConfigMap
+  → Secret
+  → Namespace
+  → PersistentVolume
+  → PersistentVolumeClaim
+
+apiVersion: apps/v1
+  → Deployment
+  → ReplicaSet
+  → StatefulSet
+  → DaemonSet
+
+apiVersion: autoscaling/v2
+  → HorizontalPodAutoscaler
+
+apiVersion: batch/v1
+  → Job
+  → CronJob
+
+apiVersion: networking.k8s.io/v1
+  → Ingress
+
+apiVersion: rbac.authorization.k8s.io/v1
+  → Role
+  → ClusterRole
+  → RoleBinding
+
+kubectl api-resources
+# Shows EVERY object with its correct apiVersion
+
+===========================================================
+Day 7: Storage — Persistent Volumes and PVCs
+============================================================
+
+The Problem — Pods Lose Data on Restart
+Pod running MySQL → stores data in /var/lib/mysql
+Pod crashes → Kubernetes restarts it
+New pod starts → /var/lib/mysql is EMPTY
+All data lost
+
+Solution: store data OUTSIDE the pod on persistent storage.
+
+The 3 Storage Objects
+
+PersistentVolume (PV)
+The actual storage resource. Created by admin or dynamically.
+Think of it as: a disk/drive that exists in the cluster.
+
+PV = the actual storage
+     "There is a 10GB disk available"
+
+PersistentVolumeClaim (PVC)
+A request for storage by a pod. Pod claims a PV.
+Think of it as: a pod saying "I need 5GB of storage".
+
+PVC = request for storage
+      "I need 5GB, give me a PV that matches"
+
+StorageClass
+Defines how storage is provisioned dynamically.
+Think of it as: a template for creating storage on demand.
+StorageClass = storage template
+               "When someone needs storage,
+                automatically create an EBS volume on AWS"
+
+Admin creates PV (or StorageClass does it dynamically)
+        ↓
+Pod creates PVC saying "I need 5GB"
+        ↓
+Kubernetes matches PVC to a suitable PV
+        ↓
+PVC is Bound to PV
+        ↓
+Pod mounts PVC as a volume
+        ↓
+Data written to pod persists even after pod restarts
+
+Volume Types You Must Know
+emptyDir     → temporary, lives as long as pod
+               deleted when pod is deleted
+               use for: scratch space, sidecar sharing
+
+hostPath     → mounts a directory from the NODE
+               data survives pod restart
+               dangerous in production (ties pod to node)
+               use for: single-node clusters, Minikube testing
+
+persistentVolumeClaim → proper persistent storage
+               survives pod restart AND pod deletion
+               use for: databases, stateful apps
+
+configMap/secret → inject config/secrets as files
+               already covered in Day 5
+
+PV Reclaim Policy
+What happens to the PV when the PVC is deleted:
+Retain   → PV stays, data preserved, manual cleanup needed
+Delete   → PV and data deleted automatically
+Recycle  → data wiped, PV made available again (deprecated)
+
+PV Access Modes
+
+ReadWriteOnce (RWO)
+  → One node can mount it read-write
+  → Most common for databases
+  → AWS EBS uses this
+
+ReadOnlyMany (ROX)
+  → Many nodes can mount it read-only
+  → Use for shared read-only data
+
+ReadWriteMany (RWX)
+  → Many nodes can mount it read-write
+  → AWS EFS uses this
+  → Use for shared file storage
 

@@ -1,0 +1,46 @@
+# StatefulSet — for stateful applications
+# Each pod gets stable name: app-0, app-1, app-2
+# Each pod gets its OWN PVC automatically
+# Pods start and stop in ORDER
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: stateful-app
+spec:
+  serviceName: "stateful-service"
+  replicas: 2
+  selector:
+    matchLabels:
+      app: stateful-app
+  template:
+    metadata:
+      labels:
+        app: stateful-app
+    spec:
+      containers:
+      - name: app
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: data-storage
+          mountPath: /data
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+  # Each pod gets its own PVC created from this template
+  volumeClaimTemplates:
+  - metadata:
+      name: data-storage
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 100Mi
+          

@@ -1,0 +1,19 @@
+# Manual PersistentVolume
+# In production this is usually done by StorageClass
+# Here we create it manually to understand the concept
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-manual
+  labels:
+    type: local
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 1Gi          # how much storage this PV has
+  accessModes:
+    - ReadWriteOnce       # one node can mount read-write
+  hostPath:
+    path: "/mnt/data"     # uses Minikube node's local disk
+  persistentVolumeReclaimPolicy: Retain
