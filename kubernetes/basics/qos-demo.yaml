@@ -1,0 +1,51 @@
+# Pod 1: Guaranteed QoS
+# requests = limits for all resources
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qos-guaranteed
+spec:
+  containers:
+  - name: app
+    image: nginx
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "128Mi" # same as request
+        cpu: "100m" # same as request
+
+---
+# Pod 2: Burstable QoS
+# requests set but lower than limits
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qos-burstable
+spec:
+  containers:
+  - name: app     
+    image: nginx
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "256Mi" # higher than request
+        cpu: "500m" # higher than request
+
+---
+# Pod 3: BestEffort QoS
+# NO resources set at all
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qos-besteffort
+spec:
+  containers:
+  - name: app
+    image: nginx:alpine
+    # No resources section = BestEffort

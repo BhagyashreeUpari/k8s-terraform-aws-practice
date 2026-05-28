@@ -239,3 +239,349 @@ Step 2: Common causes of Pending:
 Step 3: kubectl get nodes
         Are nodes Ready? If NotReady — node problem not pod problem
 
+========================================================================================
+Day3
+========================================================================================
+
+Deployment
+  └── ReplicaSet v1 (old version)
+        ├── Pod 1 (nginx:1.19)
+        └── Pod 2 (nginx:1.19)
+  └── ReplicaSet v2 (new version) ← created during update
+        ├── Pod 3 (nginx:1.21)
+        └── Pod 4 (nginx:1.21)
+
+# See deployment history
+kubectl rollout history deployment/nginx-app
+# REVISION  CHANGE-CAUSE
+# 1         Initial deployment - nginx v1.19
+# 2         <none>  (we used patch, no annotation)
+
+# Check which image is running now
+kubectl describe deployment nginx-app | grep Image
+
+# Rollback to previous version
+kubectl rollout undo deployment/nginx-app
+
+# Watch rollback happen
+kubectl rollout status deployment/nginx-app
+
+# Verify old image is back
+kubectl describe deployment nginx-app | grep Image
+
+# Check history again
+kubectl rollout history deployment/nginx-app
+# Revision 3 is now the rolled-back version
+
+# Start an update
+kubectl set image deployment/nginx-app nginx=nginx:1.23-alpine
+
+# Immediately pause it
+kubectl rollout pause deployment/nginx-app
+
+# Check — some pods updated, some not
+kubectl get pods
+kubectl describe deployment nginx-app | grep Image
+
+# Verify the new version is working on updated pods
+# If happy — resume
+kubectl rollout resume deployment/nginx-app
+
+# Watch rest of update complete
+kubectl rollout status deployment/nginx-app
+
+# Scale up
+kubectl scale deployment nginx-app --replicas=5
+kubectl get pods
+
+# Scale down
+kubectl scale deployment nginx-app --replicas=2
+kubectl get pods
+
+# Scale to zero (stops all pods but keeps deployment)
+kubectl scale deployment nginx-app --replicas=0
+kubectl get pods
+# No pods running but deployment still exists
+
+# Scale back up
+kubectl scale deployment nginx-app --replicas=3
+
+==================================================================================
+Day 4 
+============================================================================
+
+Pods are ephemeral — they die and get replaced with new IPs constantly.
+Service gives pods a stable DNS name and IP that never changes even when pods behind it change.
+
+The 4 Service Types
+ClusterIP (default)
+Only accessible inside the cluster. Other pods can reach it. Nothing outside can.
+Internet → ✗ Cannot reach
+Pod inside cluster → ✓ Can reach via service name
+Use for: internal microservices, databases, anything that should not be public.
+
+NodePort
+Opens a port on every node (30000-32767). Accessible from outside the cluster via node IP.
+Internet → NodeIP:30080 → Service → Pod
+Use for: development, Minikube testing. Not recommended for production.
+
+LoadBalancer
+Creates a cloud load balancer (AWS ELB, GCP LB). Gets a public IP automatically.
+Internet → Public IP → Load Balancer → Service → Pod
+se for: production internet-facing services on cloud providers.
+
+How Service Finds Pods — Selector
+Service uses label selector to find pods — exactly like Deployment:
+# Service
+spec:
+  selector:
+    app: payment-api    # route traffic to pods with THIS label
+
+# Pod (in Deployment template)
+metadata:
+  labels:
+    app: payment-api    # this pod matches the service selector
+If labels match → Service routes traffic to that pod.
+If pod dies and new one starts with same label → Service automatically includes it.
+
+Kubernetes DNS — How Pods Find Services
+Every Service gets a DNS name automatically:
+
+Q1. "What is a Kubernetes Service and why do we need it?"
+Pods are ephemeral — they die and get new IP addresses constantly. A Service provides a stable network endpoint with a fixed ClusterIP and DNS name that never changes. It uses label selectors to find healthy pods and automatically load balances traffic across them. When pods are replaced their new IPs are automatically added to the Service endpoints.
+
+Q2. "What are the different Service types and when do you use each?"
+ClusterIP is the default — only accessible inside the cluster, used for internal microservices. NodePort opens a fixed port on every node, accessible from outside — used for development and Minikube testing. LoadBalancer creates a cloud load balancer with a public IP — used for production internet-facing services on AWS or GCP. ExternalName maps to an external DNS name — used to abstract external services like RDS so pods do not hardcode external URLs.
+
+Q3. "What is the difference between port, targetPort and nodePort in a Service?"
+port is what the Service itself listens on inside the cluster — how other pods reach this service. targetPort is the port the container is actually listening on inside the pod. nodePort is only for NodePort type — the port opened on every node for external access. Traffic flows: nodePort on node → port on service → targetPort on pod.
+Q4. "How do microservices discover and communicate with each other in Kubernetes?"
+Through Kubernetes DNS. Every Service gets a DNS name automatically in the format service-name.namespace.svc.cluster.local. Within the same namespace pods can use just the service name. The CoreDNS component handles all DNS resolution in the cluster. This means a payment service pod can call http://auth-service/validate without knowing any IP addresses — Kubernetes DNS resolves the name to the stable ClusterIP of the auth-service Service.
+
+Scenario Q5. "Your service is not routing traffic to pods. How do you debug?"
+Step 1: Check service exists and has correct selector
+  kubectl describe service service-name
+  Look at Selector field — does it match pod labels?
+
+Step 2: Check endpoints
+  kubectl get endpoints service-name
+  If endpoints are empty → selector does not match pod labels
+  Fix: align service selector with pod labels
+
+Step 3: Check pod labels
+  kubectl get pods --show-labels
+  Do pod labels match service selector exactly?
+
+Step 4: Check pods are Ready
+  kubectl get pods
+  If pods are Running but not Ready → readiness probe failing
+  Pods not Ready are removed from endpoints automatically
+  Fix: check readiness probe configuration
+
+Step 5: Test from inside cluster
+  kubectl run test --image=busybox --rm -it -- wget service-name
+  If this works → problem is external access not internal routing
+
+  ClusterIP Flow
+  User Browser → ✗ CANNOT reach directly
+               ClusterIP only exists inside cluster
+
+Internal pod → Service ClusterIP (10.96.0.1:80)
+                      ↓
+               kube-proxy routing rules
+                      ↓
+               One of the healthy pods (10.244.0.5:80)
+
+NodePort Flow
+User Browser → Node IP : 30080
+(192.168.49.2:30080)
+                      ↓
+               kube-proxy on that node
+               sees traffic on port 30080
+                      ↓
+               Service (port 80)
+                      ↓
+               One of the healthy pods (port 80)
+
+LoadBalancer Flow
+User Browser → www.payment.com
+                      ↓
+               DNS resolves to Public IP
+               (e.g. 54.123.45.67)
+                      ↓
+               AWS Elastic Load Balancer
+               (created automatically by K8s)
+                      ↓
+               NodePort on one of the nodes
+                      ↓
+               Service
+                      ↓
+               One of the healthy pods
+
+The Role of kube-proxy in All of This
+kube-proxy runs on EVERY node.
+It watches the API server for Service changes.
+It writes iptables rules on each node.
+
+When traffic hits a node:
+  iptables rule → "port 30080? forward to service IP"
+  iptables rule → "service IP? pick one of these pod IPs"
+
+This is how routing works — not a real proxy process
+but iptables rules doing the routing at kernel level.
+
+if tyhe pod is not in ready state the end points gets ddleted automatically and readiness probe fails
+
+==================================================================
+DAY 5  configmaps and secrets
+============================================================
+
+ConfigMap — 3 Ways to Create
+Way 1 — From YAML file (what you did before)
+Way 2 — From literal values on command line
+Way 3 — From an existing file
+3 Ways to Inject Into a Pod
+Way 1 — As environment variables (individual keys)
+Way 2 — As environment variables (all keys at once)
+Way 3 — As a mounted file
+
+You will mostly use Opaque.
+Important — Secret Encoding vs Encryption
+
+Secret values are BASE64 ENCODED — not encrypted.
+Anyone with kubectl access can decode them:
+
+echo "c2VjcmV0" | base64 --decode
+→ secret
+
+In production: enable encryption at rest on API server
+Or use: AWS Secrets Manager, HashiCorp Vault
+
+Q1. "What is the difference between a ConfigMap and a Secret?"
+ConfigMap stores non-sensitive configuration — log levels, URLs, feature flags — as plain text. Secret stores sensitive data — passwords, API keys, certificates — as base64 encoded values. Both can be injected as environment variables or mounted as files. The key difference is intent and access control — Secrets can have stricter RBAC policies, can be encrypted at rest, and their values are hidden in kubectl describe output. Never put sensitive data in a ConfigMap even though technically possible.
+
+Q2. "What are the ways to inject a ConfigMap into a pod?"
+Three ways. First — individual env var using configMapKeyRef, which maps one specific key to one env var name. Second — all keys at once using envFrom with configMapRef, which creates env vars for every key in the ConfigMap. Third — mounted as files using a volume and volumeMount, which creates a file for each key inside the mounted directory. The mounted file approach has one advantage over env vars — when the ConfigMap is updated the files update automatically within about 60 seconds without restarting the pod. Env vars require a pod restart to pick up changes.
+Q3. "Are Kubernetes Secrets secure?"
+By default Secrets are only base64 encoded — not encrypted. Anyone with kubectl access and permission to read secrets can decode them with a simple base64 decode command. For real security you need additional measures: enable encryption at rest on the Kubernetes API server so secrets are encrypted in etcd, use strict RBAC to limit who can read secrets, and ideally integrate with an external secrets manager like AWS Secrets Manager or HashiCorp Vault using the External Secrets Operator. At JPMC secrets would go through an enterprise secrets management solution rather than relying solely on Kubernetes Secrets.
+
+Q4. "What happens to a running pod when you update a ConfigMap?"
+It depends on how the ConfigMap was injected. If injected as environment variables — nothing changes in the running pod. Environment variables are set at container startup and cannot be updated without restarting the pod. If injected as a mounted volume — the files inside the pod update automatically within approximately 60 seconds as Kubernetes syncs the volume. This is why for configuration that changes frequently, mounting as files is preferred over env vars — you can reload config without pod restarts.
+
+Scenario Q5. "A developer committed a database password to a ConfigMap YAML file in Git. What do you do?"
+
+Step 1: IMMEDIATE — rotate the password
+  Change the database password right away
+  Assume it is already compromised
+
+Step 2: Remove from Git history
+  git filter-branch or BFG Repo Cleaner
+  Force push to rewrite history
+  If repo is public — assume already scraped
+
+Step 3: Update the actual Kubernetes Secret
+  kubectl create secret generic db-secret \
+    --from-literal=password=NEW_PASSWORD \
+    --dry-run=client -o yaml | kubectl apply -f -
+
+Step 4: Restart pods to pick up new secret
+  kubectl rollout restart deployment/app-name
+
+Step 5: Fix the process
+  Add pre-commit hook to scan for secrets
+  Use tools like git-secrets or detect-secrets
+  Move secret values to pipeline variables
+  Never put real values in YAML files in Git
+
+====================================================================
+dAY 6 - request, limits qos classes
+====================================================================
+requests = what you are GUARANTEED
+limits   = the maximum you can use
+
+Node has 4GB memory total
+
+Pod A: requests 512Mi, limits 1GB
+Pod B: requests 512Mi, limits 1GB
+Pod C: requests 512Mi, limits 1GB
+Pod D: requests 512Mi, limits 1GB
+
+Total requested: 2GB → fits on node → all 4 pods scheduled
+At runtime Pod A uses 900Mi → still under 1GB limit → fine
+At runtime Pod A tries 1.1GB → exceeds limit → OOMKilled
+
+CPU vs Memory — Different Behaviour at Limit
+CPU limit exceeded:
+  Pod gets THROTTLED — slowed down
+  NOT killed
+  Just runs slower
+
+Memory limit exceeded:
+  Pod gets KILLED — OOMKilled
+  Exit code 137
+  Kubernetes restarts it
+
+This is a critical difference. CPU is compressible — you can slow it down. Memory is not compressible — once used you cannot take it back without killing the process.
+
+Cpu units
+
+1 CPU core = 1000 millicores
+
+cpu: "1"      = 1 full CPU core
+cpu: "500m"   = 0.5 CPU core = half a core
+cpu: "100m"   = 0.1 CPU core = 10% of one core
+cpu: "2"      = 2 full CPU cores
+
+Rule of thumb for small services:
+  requests: 100m   (needs 10% of a core normally)
+  limits: 500m     (can burst to 50% of a core)
+
+memory units
+
+Mi = Mebibytes (use this)
+Gi = Gibibytes
+
+memory: "128Mi"  = 128 Mebibytes
+memory: "256Mi"  = 256 Mebibytes
+memory: "1Gi"    = 1 Gibibyte
+
+Rule of thumb for small services:
+  requests: 128Mi  (needs 128MB normally)
+  limits: 256Mi    (can burst to 256MB)
+
+QoS Classes — Kubernetes Assigns These Automatically
+When node runs out of resources Kubernetes must evict pods. It uses QoS class to decide ORDER of eviction.
+Guaranteed — safest, evicted last
+# requests EQUALS limits for ALL containers
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "500m"
+  limits:
+    memory: "256Mi"   # same as request
+    cpu: "500m"       # same as request
+  
+  Burstable — middle priority
+  # requests set but less than limits
+resources:
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "256Mi"   # higher than request
+    cpu: "500m"       # higher than request
+  
+  BestEffort — evicted first, most dangerous
+
+What Happens When Node Runs Out of Memory
+Step 1: Node memory pressure detected
+Step 2: Kubernetes tries to free memory
+Step 3: Eviction order:
+  First  → BestEffort pods (no limits set)
+  Second → Burstable pods (limits higher than requests)
+  Last   → Guaranteed pods (requests equal limits)
+Step 4: Evicted pods get rescheduled on another node
+Step 5: If no other node has capacity → pod stays Pending
+
+
+
