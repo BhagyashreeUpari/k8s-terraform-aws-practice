@@ -1,0 +1,20 @@
+# Pod using specific ServiceAccount
+# This pod has developer-role permissions
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sa-demo-pod
+spec:
+  serviceAccountName: payment-service-sa  # use our SA
+  containers:
+  - name: kubectl-demo
+    image: bitnami/kubectl:latest
+    command: ["sleep", "3600"]
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"

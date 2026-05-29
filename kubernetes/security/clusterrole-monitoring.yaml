@@ -1,0 +1,52 @@
+# ClusterRole for monitoring tools like Prometheus
+# Needs to READ pods/nodes/metrics from ALL namespaces
+# Cannot modify anything
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: monitoring-role
+rules:
+# Read pods across all namespaces
+- apiGroups: [""]
+  resources:
+  - pods
+  - nodes
+  - services
+  - endpoints
+  - namespaces
+  verbs: ["get", "list", "watch"]
+
+# Read deployments across all namespaces
+- apiGroups: ["apps"]
+  resources:
+  - deployments
+  - replicasets
+  - statefulsets
+  verbs: ["get", "list", "watch"]
+
+# Read metrics
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list"]
+---
+# ServiceAccount for monitoring tool
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: monitoring-sa
+  namespace: monitoring
+---
+# Bind ClusterRole to monitoring ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: monitoring-rolebinding
+subjects:
+- kind: ServiceAccount
+  name: monitoring-sa
+  namespace: monitoring
+roleRef:
+  kind: ClusterRole
+  name: monitoring-role
+  apiGroup: rbac.authorization.k8s.io

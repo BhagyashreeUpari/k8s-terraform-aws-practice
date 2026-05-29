@@ -1,0 +1,32 @@
+# Developer Role
+# Can view and manage pods/deployments in default namespace
+# Cannot touch secrets or delete namespaces
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: developer-role
+  namespace: default
+rules:
+
+# Pod access — read and exec
+- apiGroups: [""]
+  resources: ["pods", "pods/log", "pods/exec"]
+  verbs: ["get", "list", "watch", "create", "delete"]
+
+# Deployment access — full control
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Service access — read only
+- apiGroups: [""]
+  resources: ["services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+
+# ConfigMap access — read only
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+
+# NO access to secrets — developers cannot read passwords

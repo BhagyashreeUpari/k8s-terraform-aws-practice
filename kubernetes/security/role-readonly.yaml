@@ -1,0 +1,32 @@
+# Read-Only Role — for L2 support engineers
+# Can view everything but change nothing
+# This mirrors your current access at JPMC
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: readonly-role
+  namespace: default
+rules:
+
+# Read pods and logs
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+
+# Read deployments
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+
+# Read services
+- apiGroups: [""]
+  resources: ["services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+
+# Read events — critical for incident investigation
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["get", "list", "watch"]
+
+# NO create, update, delete, exec on anything
