@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: scenario6-config
+data:
+  DATABASE_URL: "postgres://localhost:5432/mydb"
+  LOG_LEVEL: "INFO"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: scenario6-pod
+spec:
+  containers:
+  - name: app
+    image: busybox
+    command: ["/bin/sh", "-c"]
+    args:
+    - |
+      echo "DB URL: $DATABASE_URL"
+      echo "Log level: $LOG_LEVEL"
+      echo "API Key: $API_KEY"
+      # Check if required var is set
+      if [ -z "$API_KEY" ]; then
+        echo "ERROR: API_KEY is not set"
+        exit 1
+      fi
+    env:
+    - name: DATABASE_URL
+      valueFrom:
+        configMapKeyRef:
+          name: scenario6-config
+          key: DATABASE_URL
+    - name: LOG_LEVEL
+      valueFrom:
+        configMapKeyRef:
+          name: scenario6-config
+          key: LOG_LEVEL
+    - name: API_KEY
+      valueFrom:
+        configMapKeyRef:
+          name: scenario6-config
+          key: API_KEY          # this key does not exist in ConfigMap!
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"

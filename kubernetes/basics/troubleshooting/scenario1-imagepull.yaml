@@ -1,0 +1,16 @@
+# Fixed scenario1
+apiVersion: v1
+kind: Pod
+metadata:
+  name: scenario1-fixed
+spec:
+  containers:
+  - name: app
+    image: nginx:alpine   # correct tag
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: scenario3-pod
+spec:
+  containers:
+  - name: app
+    image: nginx:alpine
+    resources:
+      requests:
+        memory: "99999Mi"   # requests 99999MB = impossible
+        cpu: "9999"         # requests 9999 CPU cores = impossible
+      limits:
+        memory: "99999Mi"
+        cpu: "9999"
