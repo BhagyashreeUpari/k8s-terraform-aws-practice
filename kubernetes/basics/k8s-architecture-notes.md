@@ -855,3 +855,234 @@ ReadWriteMany (RWX)
   → AWS EFS uses this
   → Use for shared file storage
 
+Q1. "What is the difference between a PersistentVolume and a PersistentVolumeClaim?"
+A PersistentVolume is the actual storage resource in the cluster — a disk, NFS share, or cloud volume like AWS EBS. It is created by an admin or automatically by a StorageClass. A PersistentVolumeClaim is a request for storage by a workload — it says I need 5GB with ReadWriteOnce access. Kubernetes matches the PVC to a suitable PV and binds them together. The pod then references the PVC, not the PV directly. This separation means pods do not need to know about the underlying storage infrastructure — they just claim what they need.
+
+Q2. "What is a StorageClass and why is it important?"
+A StorageClass defines how storage is provisioned dynamically. Without it, an admin must manually create PersistentVolumes before any pod can claim storage. With a StorageClass, when a PVC is created Kubernetes automatically provisions the storage — on AWS it creates an EBS volume, on GCP a Persistent Disk, on Minikube a local hostPath volume. This is called dynamic provisioning. In production you never create PVs manually — StorageClass handles it. You just create PVCs and the right storage appears automatically.
+
+Q3. "What is the difference between a Deployment and a StatefulSet?"
+Deployment is for stateless applications where pods are interchangeable — any pod can handle any request and pods can be replaced freely. StatefulSet is for stateful applications like databases where each pod has a stable identity. StatefulSet pods have predictable names like app-0, app-1 that never change even when pods are restarted. Each pod gets its own PVC that sticks to it — if app-0 is restarted it gets the same PVC with the same data. Pods in a StatefulSet start and stop in order — app-0 starts first, then app-1. This ordering is important for database clusters where a primary must start before replicas.
+
+Q4. "What happens to a PVC when a pod is deleted?"
+Nothing — the PVC and the data persist. The PVC is independent of the pod. When a new pod is created with the same PVC name it gets access to the same data. This is the whole point of persistent storage — data survives pod restarts. The PV is only released when the PVC itself is deleted. And even then the behaviour depends on the reclaim policy — Retain keeps the data for manual cleanup, Delete removes it automatically.
+
+Scenario Q5. "A database pod restarted and all data is gone. What went wrong and how do you fix it?"
+
+Root cause: pod was using emptyDir or no volume
+emptyDir is deleted when pod is deleted → data lost
+
+Diagnose:
+  kubectl describe pod db-pod | grep -A 10 Volumes
+  If you see emptyDir → that is the problem
+  If you see no volumes → data was in container layer
+
+Fix:
+  Step 1: Create a PVC for the database
+    kubectl apply -f postgres-pvc.yaml
+
+  Step 2: Update deployment to mount PVC
+    Add volumes section with PVC reference
+    Add volumeMounts pointing to /var/lib/postgresql/data
+
+  Step 3: If possible restore from backup
+    kubectl exec -it db-pod -- psql -U postgres
+    Restore from pg_dump backup
+
+Prevention:
+  Never run databases without PVCs
+  Use StatefulSet not Deployment for databases
+  Enable automated backups (AWS RDS snapshots)
+  Test restore procedure regularly
+
+Manual PV + PVC — Step by Step
+
+Step 1: Admin creates a PV
+  "I am making a 1GB disk available in the cluster"
+  Status: Available ← sitting there waiting
+
+Step 2: Developer creates a PVC
+  "I need 500MB of storage"
+
+Step 3: Kubernetes matches them
+  PVC needs 500MB, ReadWriteOnce
+  PV has 1GB, ReadWriteOnce
+  They match → Kubernetes BINDS them together
+  PV status: Bound
+  PVC status: Bound
+
+Step 4: Pod uses the PVC
+  Pod says "mount pvc-manual at /data"
+  Pod gets access to the storage
+
+Why manual is a problem in production:
+  You have 50 services each needing storage
+  Admin has to manually create 50 PVs
+  Admin must create PVs BEFORE developers create PVCs
+  If sizes do not match → PVC stays Pending forever
+  This is a lot of manual work → toil
+
+Dynamic PVC with StorageClass — Step by Step
+Why dynamic is better:
+  Admin sets up StorageClass ONCE
+  Developers create PVCs freely
+  Storage appears automatically
+  No coordination needed
+  This is how ALL production clusters work
+
+emptyDir volume:
+  Pod restarts → data GONE
+  Pod deleted  → data GONE
+  Use for: temp files, cache, sidecar sharing
+
+hostPath volume:
+  Pod restarts → data SURVIVES (on same node)
+  Pod moves to different node → data GONE
+  Use for: Minikube testing ONLY
+
+PVC (manual or dynamic):
+  Pod restarts → data SURVIVES
+  Pod deleted  → data SURVIVES
+  Pod moves to different node → data SURVIVES
+  PVC deleted  → depends on reclaim policy
+  Use for: databases, anything that needs real persistence
+
+Retain:
+  You delete PVC
+  PV still exists, data still there
+  Status changes to: Released
+  Admin must manually clean up
+  Use when: data is valuable, want to recover it
+
+Delete:
+  You delete PVC
+  PV automatically deleted
+  Data gone forever
+  Use when: data is temporary, cloud volumes cost money
+
+Example:
+  Production database → Retain
+  Test environment   → Delete (save cloud costs)
+
+==============================================================
+Day 8: RBAC and Security
+==============================================================
+
+Role-Based Access Control — how Kubernetes controls who can do what inside the cluster.
+Why RBAC Exists
+Without RBAC:
+Every developer can:
+  kubectl delete deployment payment-service -n production
+  kubectl get secrets   ← reads all passwords
+  kubectl exec -it db-pod -- mysql   ← direct DB access
+  kubectl delete namespace production   ← wipes everything
+with RBAC 
+Junior developer can only:
+  kubectl get pods -n development
+  kubectl logs pod-name -n development
+
+Senior SRE can:
+  kubectl apply in staging and production
+  kubectl exec into pods for debugging
+
+No one can:
+  kubectl delete namespace production
+  (only cluster admin can do that)
+
+The 4 RBAC Objects
+Role — defines WHAT actions are allowed in ONE namespace
+ClusterRole — same as Role but applies across ALL namespaces
+RoleBinding — connects a Role to a user/group IN ONE namespace
+ClusterRoleBinding — connects a ClusterRole to a user CLUSTER WIDE
+get      → read one specific resource
+list     → read all resources of a type
+watch    → stream changes in real time
+create   → create new resources
+update   → modify existing resources
+patch    → partially modify resources
+delete   → delete resources
+exec     → execute commands inside pods
+
+Role + RoleBinding:
+  Access limited to ONE namespace
+  Use for: developers accessing their team namespace
+  Example: dev-team can deploy to staging namespace only
+
+ClusterRole + ClusterRoleBinding:
+  Access across ALL namespaces
+  Use for: monitoring tools, cluster admins
+  Example: Prometheus reads metrics from all namespaces
+
+ClusterRole + RoleBinding (mixed):
+  ClusterRole defined once, applied to specific namespace
+  Use for: reuse same permission set in multiple namespaces
+  Example: same "developer" role applied to staging AND production
+           but separately — not combined
+
+ServiceAccount — Identity for Pods
+When your payment-service pod calls the K8s API:
+  kubectl (inside pod) → needs identity
+  ServiceAccount = the pod's identity
+  RBAC rules apply to ServiceAccount just like users
+Every namespace has a default ServiceAccount. Pods use it automatically if you do not specify one.
+
+
+Q1. "What is RBAC in Kubernetes and what are its components?"
+RBAC stands for Role-Based Access Control. It controls who can perform what actions on which resources. It has four components. Role defines allowed actions on resources within one namespace. ClusterRole is the same but applies across all namespaces. RoleBinding connects a Role to a user or ServiceAccount in one namespace. ClusterRoleBinding connects a ClusterRole to a user or ServiceAccount cluster-wide. Together they implement the principle of least privilege — every user and process gets only the minimum access they need.
+
+Q2. "What is a ServiceAccount and why do pods need one?"
+A ServiceAccount is the identity for a pod when it calls the Kubernetes API. Humans authenticate with usernames and certificates. Pods authenticate with ServiceAccounts. Every pod automatically gets the default ServiceAccount in its namespace if none is specified. But giving all pods the default ServiceAccount means they all share the same permissions — a security risk. Best practice is to create a dedicated ServiceAccount per service with only the permissions that service needs. For example my payment service ServiceAccount can list pods but cannot read secrets or delete namespaces.
+
+Q3. "What is the difference between Role and ClusterRole?"
+A Role applies within one specific namespace — permissions defined in a Role only work in that namespace. A ClusterRole applies across all namespaces. For example a developer Role in the staging namespace cannot access the production namespace. A monitoring ClusterRole can read pods from every namespace. An important pattern is using a ClusterRole with a RoleBinding — you define the permission set once as a ClusterRole then bind it to specific namespaces using RoleBindings. This avoids duplicating Role definitions across many namespaces.
+
+Scenario Q5. "A developer accidentally deleted a production deployment. How do you prevent this in future?"
+
+Immediate fix:
+  kubectl rollout history deployment/payment-service -n production
+  kubectl rollout undo deployment/payment-service -n production
+  Or reapply from Git: kubectl apply -f deployment.yaml
+
+Root cause: developer had delete verb on deployments
+in production namespace — too much access
+
+Prevention using RBAC:
+
+Step 1: Create separate namespaces
+  development, staging, production
+
+Step 2: Developer Role in development — full access
+  verbs: get, list, watch, create, update, patch, delete
+
+Step 3: Developer Role in staging — limited access
+  verbs: get, list, watch, create, update, patch
+  NO delete verb in staging
+
+Step 4: Developer access in production — read only
+  verbs: get, list, watch ONLY
+  Only SREs can deploy to production
+
+Step 5: CI/CD pipeline ServiceAccount for production
+  Only the pipeline can apply to production
+  Pipeline triggered by PR merge with required approvals
+  Human cannot deploy directly — must go through pipeline
+
+Step 6: Audit regularly
+  kubectl auth can-i --list --as=developer-user -n production
+  Verify permissions match what is intended
+
+============================================================
+DAY 9 - PRATCTICAL
+=============================================================
+
+Q1. "Walk me through debugging a CrashLoopBackOff."
+First kubectl get pods to confirm the status. Then kubectl describe pod to read the Events section — this usually shows the exit code and last termination reason. Then kubectl logs pod-name -p with the -p flag for previous container logs — this shows what the application printed before it crashed. Common causes are missing environment variables, wrong startup command, application code error, or database connection failure. In Scenario 2 today the app was exiting because DB_HOST was not set — the fix was adding the environment variable.
+Q2. "A pod is Pending for 10 minutes. What do you check?"
+Run kubectl describe pod pod-name and look at the Events section. The most common cause is insufficient resources — the events will say something like "0/1 nodes are available: 1 Insufficient memory." The fix is to reduce the resource requests in the pod spec. Other causes include a node selector that matches no nodes, a taint on all nodes with no matching toleration, or a PVC that has not been bound yet. In Scenario 3 today we requested 99999MB of memory which no node could provide.
+Q3. "Service exists but pods are not receiving traffic. How do you debug?"
+Run kubectl get endpoints service-name. If the endpoints list is empty it means the service selector does not match any pod labels. Run kubectl get pods --show-labels to see what labels pods actually have, then compare with kubectl describe service service-name to see what the selector is looking for. In Scenario 4 today the service was looking for app=wrong-label but pods had app=my-app. Fix was patching the service selector to match the pod labels.
+
+=========================================================
+day 10 - Project
+=============================================
+
